@@ -5,7 +5,18 @@ fn main() -> anyhow::Result<()> {
 
     match plugins {
         Ok(list) => {
-            println!("Installed plugins: {}", list.len());
+            println!("Installed plugins: {}\n", list.len());
+            
+            if !list.is_empty() {
+                for plugin in &list {
+                    println!("  [{:?}] {}", plugin.format, plugin.plugin.name);
+                    println!("    Path: {}", plugin.install_path.display());
+                    if let Some(desc) = &plugin.plugin.description {
+                        println!("    {}", desc);
+                    }
+                    println!();
+                }
+            }
         }
         Err(e) => {
             eprintln!("Error: {e}");
