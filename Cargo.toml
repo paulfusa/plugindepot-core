@@ -5,7 +5,10 @@ edition = "2024"
 
 [lib]
 name = "plugindepot_core"
-crate-type = ["rlib"]
+# rlib: For Rust code and CLI
+# cdylib: For dynamic library (Windows DLL via P/Invoke)
+# staticlib: For static library (macOS via Swift FFI)
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "plugindepot"
