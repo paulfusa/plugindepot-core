@@ -21,7 +21,7 @@
 //! - Scans Program Files and Common Files locations
 //! - No AU support (macOS-only format)
 
-use crate::{InstalledPlugin, Plugin, PluginFormat};
+use crate::{InstalledPlugin, Plugin, PluginFormat, RelatedPaths};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
@@ -169,17 +169,21 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
                     // Create a minimal Plugin entry
                     let plugin = Plugin {
                         id: format!("{}.{}", format!("{:?}", format).to_lowercase(), plugin_name.to_lowercase().replace(" ", "-")),
-                        name: plugin_name,
+                        name: plugin_name.clone(),
                         version: String::from("unknown"), // TODO: Extract from bundle
                         description: Some(format!("{:?} plugin", format)),
                         author: None, // TODO: Extract from bundle
                     };
+                    
+                    // Discover related files for this plugin
+                    let related_paths = discover_related_paths(&plugin_name, format);
                     
                     plugins.push(InstalledPlugin {
                         plugin,
                         install_path: path,
                         format: format.clone(),
                         enabled: true, // TODO: Check if plugin is disabled in DAW settings
+                        related_paths,
                     });
                 }
             }
@@ -189,8 +193,191 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
     Ok(plugins)
 }
 
+/// Discovers related files and folders for a plugin (presets, libraries, support files).
+/// This scans common locations where plugins store their data.
+fn discover_related_paths(plugin_name: &str, _format: &PluginFormat) -> RelatedPaths {
+    let mut paths = RelatedPaths::default();
+    
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            // Common preset locations on macOS
+            let preset_candidates = vec![
+                format!("{}/Music/{}", home, plugin_name),
+                format!("{}/Library/Audio/Presets/{}", home, plugin_name),
+                format!("{}/Documents/{}", home, plugin_name),
+                format!("{}/Documents/{} Library", home, plugin_name),
+            ];
+            
+            // Common library/content locations
+            let library_candidates = vec![
+                format!("/Library/Application Support/{}", plugin_name),
+                format!("{}/Library/Application Support/{}", home, plugin_name),
+                format!("/Library/Audio/Sounds/{}", plugin_name),
+                format!("{}/Library/Audio/Sounds/{}", home, plugin_name),
+            ];
+            
+            // Preferences locations
+            let pref_candidates = vec![
+                format!("{}/Library/Preferences/com.{}.plist", home, plugin_name.to_lowercase().replace(" ", "")),
+                format!("{}/Library/Preferences/{}.plist", home, plugin_name.replace(" ", "")),
+            ];
+            
+            paths.preset_locations = preset_candidates.into_iter()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+            
+            paths.library_locations = library_candidates.into_iter()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+            
+            paths.preference_files = pref_candidates.into_iter()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+        }
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Common locations on Windows
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let preset_candidates = vec![
+                format!(r"{}\{}", appdata, plugin_name),
+                format!(r"{}\{}\Presets", appdata, plugin_name),
+            ];
+            
+            paths.preset_locations = preset_candidates.into_iter()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+        }
+        
+        if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+            let library_candidates = vec![
+                format!(r"{}\{}", programdata, plugin_name),
+            ];
+            
+            paths.library_locations = library_candidates.into_iter()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
+                .collect();
+        }
+        
+        // TODO: Check registry for additional paths
+    }
+    
+    paths
+}
+
+/// Enumerates all files associated with a plugin for uninstall or backup.
+/// Returns a complete list of paths that should be removed/backed up.
+pub fn enumerate_plugin_files(plugin: &InstalledPlugin) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    
+    // Add the main plugin binary/bundle
+    files.push(plugin.install_path.clone());
+    
+    // Add all discovered related paths
+    for path in &plugin.related_paths.preset_locations {
+        files.extend(enumerate_directory_recursive(path)?);
+    }
+    
+    for path in &plugin.related_paths.library_locations {
+        files.extend(enumerate_directory_recursive(path)?);
+    }
+    
+    for path in &plugin.related_paths.support_locations {
+        files.extend(enumerate_directory_recursive(path)?);
+    }
+    
+    files.extend(plugin.related_paths.preference_files.clone());
+    
+    Ok(files)
+}
+
+/// Recursively enumerates all files in a directory.
+fn enumerate_directory_recursive(dir: &PathBuf) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    
+    if !dir.exists() {
+        return Ok(files);
+    }
+    
+    if dir.is_file() {
+        files.push(dir.clone());
+        return Ok(files);
+    }
+    
+    let entries = fs::read_dir(dir)
+        .context(format!("Failed to read directory: {:?}", dir))?;
+    
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_dir() {
+            files.extend(enumerate_directory_recursive(&path)?);
+        } else {
+            files.push(path);
+        }
+    }
+    
+    Ok(files)
+}
+
 // TODO: Future functions to implement:
 // - extract_bundle_metadata() - Parse Info.plist from AU/VST3 bundles
-// - find_plugin_libraries() - Locate associated library files scattered across system
 // - backup_plugin() - Create backup of plugin and its libraries
 // - remove_plugin() - Safely remove plugin and clean up libraries
+// - export_for_migration() - Package plugin for moving to another machine
+// - import_plugin() - Restore plugin from migration package
+
+/// Detects orphaned files - files in plugin directories that don't belong to any installed plugin.
+/// This helps identify leftovers from uninstalled plugins.
+pub fn detect_orphaned_files() -> Result<Vec<PathBuf>> {
+    let plugin_dirs = get_plugin_directories()?;
+    let installed = scan_installed()?;
+    let mut orphaned = Vec::new();
+    
+    // Build a set of all known plugin paths
+    let mut known_paths = std::collections::HashSet::new();
+    for plugin in &installed {
+        known_paths.insert(plugin.install_path.clone());
+        // Also add all related paths
+        for path in &plugin.related_paths.preset_locations {
+            known_paths.insert(path.clone());
+        }
+        for path in &plugin.related_paths.library_locations {
+            known_paths.insert(path.clone());
+        }
+    }
+    
+    // Scan each plugin directory for files not in our known set
+    for (dir, _format) in plugin_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        
+        match fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        // If this path is not in our known plugins, it's orphaned
+                        if !known_paths.contains(&path) {
+                            orphaned.push(path);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to scan directory {:?}: {}", dir, e);
+            }
+        }
+    }
+    
+    Ok(orphaned)
+}
