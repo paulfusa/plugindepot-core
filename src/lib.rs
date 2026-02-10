@@ -41,5 +41,6 @@
 pub mod plugin;
 pub mod registry;
 pub mod operations;
+pub mod ffi;
 
 pub use plugin::{Plugin, InstalledPlugin, PluginFormat, RelatedPaths, Vendor, License, PluginMetadata};
