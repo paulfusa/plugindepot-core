@@ -6,6 +6,7 @@ Cross-platform audio plugin manager core written in Rust. Manages VST2, VST3, Au
 
 - **Plugin Discovery** - Automatically scan system for installed plugins
 - **Related File Detection** - Find presets, libraries, and support files
+- **Icon Management** - Pull and cache plugin icons for native UI display
 - **Safe Uninstall** - Preview files before deletion, clean removal
 - **Backup & Restore** - Create timestamped backups of plugins and data
 - **Migration Support** - Export/import plugins between machines
@@ -73,6 +74,13 @@ cargo run --release  # See scanned plugins
 - Memory-safe string handling
 - Opaque pointer types for data structures
 - See `FFI_GUIDE.md` for complete documentation
+
+### `icons.rs` - Icon Management
+- `fetch_icon()` - Retrieve icon from URL (with caching)
+- `cache_icon_data()` - Store downloaded icon locally
+- `get_cached_icon_path()` - Check if icon is cached
+- `clear_icon_cache()` - Remove all cached icons
+- Cross-platform cache directory management
 
 ## Usage 
 See `FFI_GUIDE.md` & `examples/` directory for complete integration examples.

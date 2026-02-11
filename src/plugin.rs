@@ -17,6 +17,8 @@ pub struct Plugin {
     pub version: String,
     pub description: Option<String>,
     pub author: Option<String>,
+    /// URL to the plugin's icon/logo for display in native UI
+    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]

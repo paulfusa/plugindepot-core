@@ -36,6 +36,7 @@ typedef struct {
     int32_t preset_count;
     int32_t library_count;
     int32_t preference_count;
+    char* icon_url;         /* URL to plugin icon. May be NULL. */
 } CPlugin;
 
 typedef enum {
@@ -149,6 +150,33 @@ char* plugindepot_export_plugin(const CPluginList* list, int32_t index, const ch
  * @return Path list. Caller must call plugindepot_free_path_list().
  */
 CPathList* plugindepot_enumerate_files(const CPluginList* list, int32_t index);
+
+/* ============================================================================
+ * Icon Management
+ * ============================================================================ */
+
+/**
+ * Cache icon data for a given URL.
+ * This should be called by the native UI after downloading the icon.
+ * @param icon_url Icon URL (null-terminated string)
+ * @param data Raw icon data bytes
+ * @param data_length Length of data in bytes
+ * @return Cached file path on success, or NULL on error. Caller must call plugindepot_free_string().
+ */
+char* plugindepot_cache_icon(const char* icon_url, const uint8_t* data, int32_t data_length);
+
+/**
+ * Get the cached icon path for a URL, if it exists.
+ * @param icon_url Icon URL (null-terminated string)
+ * @return Cached file path, or NULL if not cached. Caller must call plugindepot_free_string().
+ */
+char* plugindepot_get_cached_icon_path(const char* icon_url);
+
+/**
+ * Clear all cached icons.
+ * @return 0 on success, 1 on error
+ */
+int32_t plugindepot_clear_icon_cache(void);
 
 /* ============================================================================
  * Memory Management

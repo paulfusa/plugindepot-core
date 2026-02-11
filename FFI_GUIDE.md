@@ -144,6 +144,78 @@ foreach (var plugin in plugins)
 - List all files associated with a plugin
 - Useful for showing what will be affected by operations
 
+### 7. Icon Management
+
+**Functions:**
+- `plugindepot_cache_icon(icon_url, data, data_length)` - Cache icon data locally
+- `plugindepot_get_cached_icon_path(icon_url)` - Get cached icon path if it exists
+- `plugindepot_clear_icon_cache()` - Clear all cached icons
+
+**Usage Pattern:**
+
+The icon system is designed for native UI to handle downloading and caching:
+
+1. **Plugin includes `icon_url` field** - URL to download the icon from
+2. **Native UI downloads the icon** - Using platform-native networking (URLSession, HttpClient)
+3. **Native UI caches via FFI** - Call `plugindepot_cache_icon()` to store locally
+4. **Future loads check cache first** - Call `plugindepot_get_cached_icon_path()` before downloading
+
+**Swift Example:**
+```swift
+// Get plugin with icon_url
+let plugin = getPluginAtIndex(0)
+if let iconURL = plugin.icon_url {
+    // Check if already cached
+    if let cachedPath = PluginDepotCore.getCachedIconPath(url: iconURL) {
+        // Use cached icon
+        loadImage(from: cachedPath)
+    } else {
+        // Download using URLSession
+        URLSession.shared.dataTask(with: URL(string: iconURL)!) { data, _, _ in
+            guard let data = data else { return }
+            // Cache for future use
+            _ = PluginDepotCore.cacheIcon(url: iconURL, data: data)
+            // Display icon
+            DispatchQueue.main.async {
+                loadImage(from: data)
+            }
+        }.resume()
+    }
+}
+```
+
+**C# Example:**
+```csharp
+// Get plugin with icon_url
+var plugin = GetPluginAtIndex(0);
+if (!string.IsNullOrEmpty(plugin.IconUrl))
+{
+    // Check if already cached
+    string cachedPath = PluginDepotCore.GetCachedIconPath(plugin.IconUrl);
+    if (!string.IsNullOrEmpty(cachedPath))
+    {
+        // Use cached icon
+        LoadImage(cachedPath);
+    }
+    else
+    {
+        // Download using HttpClient
+        using var client = new HttpClient();
+        byte[] iconData = await client.GetByteArrayAsync(plugin.IconUrl);
+        // Cache for future use
+        PluginDepotCore.CacheIcon(plugin.IconUrl, iconData);
+        // Display icon
+        LoadImage(iconData);
+    }
+}
+```
+
+**Benefits:**
+- Native UI controls image downloading with platform-specific features (retry logic, progress, etc.)
+- Rust handles efficient local caching with filesystem management
+- Icons persist across app launches
+- Cross-platform cache management
+
 ## ⚠️ Memory Management Rules
 
 **CRITICAL:** The Rust core allocates memory that **MUST** be freed by the caller.

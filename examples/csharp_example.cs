@@ -62,6 +62,19 @@ namespace PluginDepot
         [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void plugindepot_free_string(IntPtr str);
 
+        [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr plugindepot_cache_icon(
+            [MarshalAs(UnmanagedType.LPStr)] string iconUrl,
+            byte[] data,
+            int dataLength);
+
+        [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr plugindepot_get_cached_icon_path(
+            [MarshalAs(UnmanagedType.LPStr)] string iconUrl);
+
+        [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int plugindepot_clear_icon_cache();
+
         // ====================================================================
         // Types
         // ====================================================================
@@ -78,6 +91,7 @@ namespace PluginDepot
             public int preset_count;
             public int library_count;
             public int preference_count;
+            public IntPtr icon_url;
         }
 
         public enum PluginFormat
@@ -99,6 +113,7 @@ namespace PluginDepot
             public int PresetCount { get; set; }
             public int LibraryCount { get; set; }
             public int PreferenceCount { get; set; }
+            public string IconUrl { get; set; }  // URL to plugin icon
 
             public string FormatDisplayName => Format switch
             {
@@ -150,7 +165,10 @@ namespace PluginDepot
                             Format = (PluginFormat)cPlugin.format,
                             PresetCount = cPlugin.preset_count,
                             LibraryCount = cPlugin.library_count,
-                            PreferenceCount = cPlugin.preference_count
+                            PreferenceCount = cPlugin.preference_count,
+                            IconUrl = cPlugin.icon_url != IntPtr.Zero
+                                ? Marshal.PtrToStringAnsi(cPlugin.icon_url)
+                                : null
                         });
                     }
                     finally
@@ -292,6 +310,56 @@ namespace PluginDepot
             {
                 plugindepot_free_string(resultPtr);
             }
+        }
+
+        // ====================================================================
+        // Icon Management
+        // ====================================================================
+
+        /// <summary>
+        /// Cache icon data after downloading it
+        /// </summary>
+        public static string CacheIcon(string iconUrl, byte[] iconData)
+        {
+            IntPtr resultPtr = plugindepot_cache_icon(iconUrl, iconData, iconData.Length);
+            if (resultPtr == IntPtr.Zero)
+                return null;
+
+            try
+            {
+                return Marshal.PtrToStringAnsi(resultPtr);
+            }
+            finally
+            {
+                plugindepot_free_string(resultPtr);
+            }
+        }
+
+        /// <summary>
+        /// Get the cached icon path if it exists
+        /// </summary>
+        public static string GetCachedIconPath(string iconUrl)
+        {
+            IntPtr resultPtr = plugindepot_get_cached_icon_path(iconUrl);
+            if (resultPtr == IntPtr.Zero)
+                return null;
+
+            try
+            {
+                return Marshal.PtrToStringAnsi(resultPtr);
+            }
+            finally
+            {
+                plugindepot_free_string(resultPtr);
+            }
+        }
+
+        /// <summary>
+        /// Clear all cached icons
+        /// </summary>
+        public static bool ClearIconCache()
+        {
+            return plugindepot_clear_icon_cache() == 0;
         }
     }
 }

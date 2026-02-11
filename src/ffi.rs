@@ -34,11 +34,13 @@
 
 use crate::registry::{scan_installed, detect_orphaned_files, enumerate_plugin_files};
 use crate::operations::{backup_plugin, uninstall_plugin, export_plugin};
+use crate::icons::{cache_icon_data, get_cached_icon_path, clear_icon_cache};
 use crate::{InstalledPlugin, PluginFormat};
 use std::ffi::{CString, CStr};
 use std::os::raw::{c_char, c_int};
 use std::path::PathBuf;
 use std::ptr;
+use std::slice;
 
 // ============================================================================
 // C-Compatible Types
@@ -62,6 +64,8 @@ pub struct CPlugin {
     pub preset_count: c_int,
     pub library_count: c_int,
     pub preference_count: c_int,
+    /// URL to the plugin's icon (null if not available)
+    pub icon_url: *mut c_char,
 }
 
 /// C-compatible path list
@@ -140,6 +144,9 @@ pub extern "C" fn plugindepot_plugin_list_get(list: *const CPluginList, index: c
             preset_count: plugin.related_paths.preset_locations.len() as c_int,
             library_count: plugin.related_paths.library_locations.len() as c_int,
             preference_count: plugin.related_paths.preference_files.len() as c_int,
+            icon_url: plugin.plugin.icon_url.as_ref()
+                .map(|s| string_to_c_char(s))
+                .unwrap_or(ptr::null_mut()),
         });
         
         Box::into_raw(c_plugin)
@@ -167,6 +174,7 @@ pub extern "C" fn plugindepot_free_plugin(plugin: *mut CPlugin) {
             free_c_char(p.version);
             free_c_char(p.description);
             free_c_char(p.install_path);
+            free_c_char(p.icon_url);
         }
     }
 }
@@ -376,6 +384,77 @@ pub extern "C" fn plugindepot_enumerate_files(
                 eprintln!("Error enumerating files: {}", e);
                 ptr::null_mut()
             }
+        }
+    }
+}
+
+// ============================================================================
+// Icon Management
+// ============================================================================
+
+/// Cache icon data for a given URL.
+/// This should be called by the native UI after downloading the icon.
+/// Returns the cached file path on success, or null on error.
+/// Caller MUST call plugindepot_free_string() when done.
+#[no_mangle]
+pub extern "C" fn plugindepot_cache_icon(
+    icon_url: *const c_char,
+    data: *const u8,
+    data_length: c_int,
+) -> *mut c_char {
+    if icon_url.is_null() || data.is_null() || data_length <= 0 {
+        return ptr::null_mut();
+    }
+    
+    unsafe {
+        let url = match CStr::from_ptr(icon_url).to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        };
+        
+        let data_slice = slice::from_raw_parts(data, data_length as usize);
+        
+        match cache_icon_data(url, data_slice) {
+            Ok(path) => string_to_c_char(&path.to_string_lossy()),
+            Err(e) => {
+                eprintln!("Error caching icon: {}", e);
+                ptr::null_mut()
+            }
+        }
+    }
+}
+
+/// Get the cached icon path for a URL, if it exists.
+/// Returns null if the icon is not cached.
+/// Caller MUST call plugindepot_free_string() when done.
+#[no_mangle]
+pub extern "C" fn plugindepot_get_cached_icon_path(icon_url: *const c_char) -> *mut c_char {
+    if icon_url.is_null() {
+        return ptr::null_mut();
+    }
+    
+    unsafe {
+        let url = match CStr::from_ptr(icon_url).to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        };
+        
+        match get_cached_icon_path(url) {
+            Some(path) => string_to_c_char(&path.to_string_lossy()),
+            None => ptr::null_mut(),
+        }
+    }
+}
+
+/// Clear all cached icons.
+/// Returns 0 on success, 1 on error.
+#[no_mangle]
+pub extern "C" fn plugindepot_clear_icon_cache() -> c_int {
+    match clear_icon_cache() {
+        Ok(_) => 0,
+        Err(e) => {
+            eprintln!("Error clearing icon cache: {}", e);
+            1
         }
     }
 }

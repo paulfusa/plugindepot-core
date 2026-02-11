@@ -21,6 +21,7 @@ class PluginDepotCore {
         let presetCount: Int
         let libraryCount: Int
         let preferenceCount: Int
+        let iconUrl: String?  // URL to plugin icon
     }
     
     enum PluginFormat: Int32 {
@@ -64,7 +65,8 @@ class PluginDepotCore {
                     format: PluginFormat(rawValue: cPlugin.pointee.format) ?? .vst2,
                     presetCount: Int(cPlugin.pointee.preset_count),
                     libraryCount: Int(cPlugin.pointee.library_count),
-                    preferenceCount: Int(cPlugin.pointee.preference_count)
+                    preferenceCount: Int(cPlugin.pointee.preference_count),
+                    iconUrl: cPlugin.pointee.icon_url != nil ? String(cString: cPlugin.pointee.icon_url) : nil
                 )
                 plugins.append(plugin)
             }
@@ -142,6 +144,38 @@ class PluginDepotCore {
         }
         defer { plugindepot_free_string(resultPtr) }
         return String(cString: resultPtr)
+    }
+    
+    // MARK: - Icon Management
+    
+    /// Cache icon data after downloading it
+    static func cacheIcon(url: String, data: Data) -> String? {
+        return data.withUnsafeBytes { bufferPtr in
+            guard let baseAddress = bufferPtr.baseAddress else { return nil }
+            guard let resultPtr = plugindepot_cache_icon(
+                url,
+                baseAddress.assumingMemoryBound(to: UInt8.self),
+                Int32(data.count)
+            ) else {
+                return nil
+            }
+            defer { plugindepot_free_string(resultPtr) }
+            return String(cString: resultPtr)
+        }
+    }
+    
+    /// Get the cached icon path if it exists
+    static func getCachedIconPath(url: String) -> String? {
+        guard let resultPtr = plugindepot_get_cached_icon_path(url) else {
+            return nil
+        }
+        defer { plugindepot_free_string(resultPtr) }
+        return String(cString: resultPtr)
+    }
+    
+    /// Clear all cached icons
+    static func clearIconCache() -> Bool {
+        return plugindepot_clear_icon_cache() == 0
     }
 }
 

@@ -166,6 +166,9 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
                 if let Some(name) = path.file_stem() {
                     let plugin_name = name.to_string_lossy().to_string();
                     
+                    // Generate icon URL (this could be customized to fetch from a plugin database)
+                    let icon_url = generate_icon_url(&plugin_name);
+                    
                     // Create a minimal Plugin entry
                     let plugin = Plugin {
                         id: format!("{}.{}", format!("{:?}", format).to_lowercase(), plugin_name.to_lowercase().replace(" ", "-")),
@@ -173,6 +176,7 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
                         version: String::from("unknown"), // TODO: Extract from bundle
                         description: Some(format!("{:?} plugin", format)),
                         author: None, // TODO: Extract from bundle
+                        icon_url,
                     };
                     
                     // Discover related files for this plugin
@@ -270,6 +274,24 @@ fn discover_related_paths(plugin_name: &str, _format: &PluginFormat) -> RelatedP
     }
     
     paths
+}
+
+/// Generates an icon URL for a plugin.
+/// This can be customized to fetch from a plugin database or API.
+/// For now, it returns a placeholder URL that can be populated from metadata or external sources.
+fn generate_icon_url(_plugin_name: &str) -> Option<String> {
+    // TODO: Implement actual icon URL lookup from:
+    // - Plugin bundle metadata (Info.plist)
+    // - External plugin database/API
+    // - Local icon storage
+    // - Vendor website
+    
+    // For now, return None - icons should be populated from external sources
+    // Example format if you had a plugin database:
+    // Some(format!("https://pluginicons.example.com/{}.png", 
+    //     plugin_name.to_lowercase().replace(" ", "-")))
+    
+    None
 }
 
 /// Enumerates all files associated with a plugin for uninstall or backup.
