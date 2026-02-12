@@ -5,10 +5,11 @@
 //!
 //! # Features
 //!
-//! - Fetch icons from remote URLs
-//! - Cache icons locally to reduce network requests
+//! - Fetch icons from remote URLs (http/https)
+//! - Support local file:// URLs for icons in plugin bundles
+//! - Cache remote icons locally to reduce network requests
 //! - Provide icon data as raw bytes for native UI consumption
-//! - Support common image formats (PNG, JPEG, SVG)
+//! - Support common image formats (PNG, JPEG, ICNS, ICO)
 
 use anyhow::{Context, Result, anyhow};
 use std::fs;
@@ -106,7 +107,20 @@ pub fn cache_icon_data(url: &str, data: &[u8]) -> Result<PathBuf> {
 }
 
 /// Get the cached icon path if it exists, without attempting to download.
+/// For file:// URLs, returns the local path directly.
+/// For HTTP(S) URLs, checks the cache.
 pub fn get_cached_icon_path(url: &str) -> Option<PathBuf> {
+    // If it's a file:// URL, return the path directly after stripping the prefix
+    if url.starts_with("file://") {
+        let path_str = url.trim_start_matches("file://");
+        let path = PathBuf::from(path_str);
+        if path.exists() {
+            return Some(path);
+        }
+        return None;
+    }
+    
+    // For HTTP(S) URLs, check the cache
     if let Ok(cache_dir) = get_icon_cache_dir() {
         let cache_filename = url_to_cache_filename(url);
         let cache_path = cache_dir.join(&cache_filename);

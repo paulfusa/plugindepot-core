@@ -15,6 +15,13 @@ fn main() -> anyhow::Result<()> {
                         println!("    {}", desc);
                     }
                     
+                    // Show icon if available
+                    if let Some(icon_url) = &plugin.plugin.icon_url {
+                        println!("    Icon: {}", icon_url);
+                    } else {
+                        println!("    Icon: Not found");
+                    }
+                    
                     // Show related paths if found
                     if !plugin.related_paths.preset_locations.is_empty() {
                         println!("    Presets: {} location(s)", plugin.related_paths.preset_locations.len());

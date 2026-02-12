@@ -130,6 +130,9 @@ pub fn scan_installed() -> Result<Vec<InstalledPlugin>> {
         }
     }
     
+    // Share icons between VST2 and VST3 versions of the same plugin
+    share_icons_between_formats(&mut installed);
+    
     Ok(installed)
 }
 
@@ -166,8 +169,8 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
                 if let Some(name) = path.file_stem() {
                     let plugin_name = name.to_string_lossy().to_string();
                     
-                    // Generate icon URL (this could be customized to fetch from a plugin database)
-                    let icon_url = generate_icon_url(&plugin_name);
+                    // Discover icon from plugin bundle or local files
+                    let icon_url = discover_plugin_icon(&path, &plugin_name);
                     
                     // Create a minimal Plugin entry
                     let plugin = Plugin {
@@ -195,6 +198,66 @@ fn scan_directory(dir: &PathBuf, format: &PluginFormat) -> Result<Vec<InstalledP
     }
     
     Ok(plugins)
+}
+
+/// Share icons between VST2 and VST3 versions of the same plugin.
+/// If a VST2 plugin doesn't have an icon but a VST3 version exists with an icon, use it.
+fn share_icons_between_formats(plugins: &mut [InstalledPlugin]) {
+    // Build a map of plugin names to their icons by format
+    let mut vst3_icons: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    
+    // First pass: collect VST3 icons
+    for plugin in plugins.iter() {
+        if matches!(plugin.format, PluginFormat::VST3) {
+            if let Some(icon_url) = &plugin.plugin.icon_url {
+                // Normalize the plugin name for matching
+                let normalized_name = normalize_plugin_name(&plugin.plugin.name);
+                vst3_icons.insert(normalized_name, icon_url.clone());
+            }
+        }
+    }
+    
+    // Second pass: apply VST3 icons to VST2 plugins that don't have icons
+    for plugin in plugins.iter_mut() {
+        if matches!(plugin.format, PluginFormat::VST2) {
+            if plugin.plugin.icon_url.is_none() {
+                let normalized_name = normalize_plugin_name(&plugin.plugin.name);
+                if let Some(vst3_icon) = vst3_icons.get(&normalized_name) {
+                    plugin.plugin.icon_url = Some(vst3_icon.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Normalize a plugin name for matching between formats.
+/// Removes common suffixes, spaces, and converts to lowercase.
+fn normalize_plugin_name(name: &str) -> String {
+    let mut normalized = name.to_lowercase();
+    
+    // Remove common version suffixes and architecture markers
+    let suffixes_to_remove = [
+        " vst", " vst2", " vst3",
+        "vst", "vst2", "vst3",
+        " x64", " x86", "_x64", "_x86",
+        " 64", " 32", "_64", "_32",
+        " fx", " effect", "_fx", "_effect",
+    ];
+    
+    for suffix in &suffixes_to_remove {
+        // Remove from the end
+        while normalized.ends_with(suffix) {
+            normalized = normalized.trim_end_matches(suffix).to_string();
+        }
+    }
+    
+    // Remove spaces, dashes, and underscores for better matching
+    normalized = normalized
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "");
+    
+    normalized
 }
 
 /// Discovers related files and folders for a plugin (presets, libraries, support files).
@@ -276,20 +339,101 @@ fn discover_related_paths(plugin_name: &str, _format: &PluginFormat) -> RelatedP
     paths
 }
 
-/// Generates an icon URL for a plugin.
-/// This can be customized to fetch from a plugin database or API.
-/// For now, it returns a placeholder URL that can be populated from metadata or external sources.
-fn generate_icon_url(_plugin_name: &str) -> Option<String> {
-    // TODO: Implement actual icon URL lookup from:
-    // - Plugin bundle metadata (Info.plist)
-    // - External plugin database/API
-    // - Local icon storage
-    // - Vendor website
+/// Discovers an icon for a plugin by searching in the plugin bundle.
+/// Returns a file:// URL to the local icon if found.
+fn discover_plugin_icon(plugin_path: &PathBuf, plugin_name: &str) -> Option<String> {
+    // For bundle-based plugins (macOS .component, .vst3, .vst, Windows .vst3)
+    if plugin_path.is_dir() {
+        // Common icon locations within bundles
+        let icon_search_paths = vec![
+            "Contents/Resources",
+            "Resources",
+            "Contents",
+        ];
+        
+        // Common icon file extensions
+        let icon_extensions = vec!["icns", "png", "ico", "jpg", "jpeg"];
+        
+        for search_path in &icon_search_paths {
+            let resource_dir = plugin_path.join(search_path);
+            if !resource_dir.exists() {
+                continue;
+            }
+            
+            // Try to find icon files
+            if let Ok(entries) = fs::read_dir(&resource_dir) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(ext) = entry_path.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            if icon_extensions.contains(&ext_str.as_str()) {
+                                let file_name = entry_path.file_stem()
+                                    .map(|n| n.to_string_lossy().to_lowercase())
+                                    .unwrap_or_default();
+                                
+                                // Prefer files named after the plugin or common icon names
+                                let plugin_name_lower = plugin_name.to_lowercase().replace(" ", "");
+                                if file_name.contains(&plugin_name_lower) 
+                                    || file_name == "icon" 
+                                    || file_name == "logo"
+                                    || file_name == "appicon"
+                                    || file_name.starts_with("icon")
+                                    || file_name.starts_with("logo") {
+                                    // Return file:// URL
+                                    return Some(format!("file://{}", entry_path.display()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If no specific icon found, try to find ANY icon file
+        for search_path in &icon_search_paths {
+            let resource_dir = plugin_path.join(search_path);
+            if !resource_dir.exists() {
+                continue;
+            }
+            
+            if let Ok(entries) = fs::read_dir(&resource_dir) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(ext) = entry_path.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            if icon_extensions.contains(&ext_str.as_str()) {
+                                // Return the first icon we find
+                                return Some(format!("file://{}", entry_path.display()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
-    // For now, return None - icons should be populated from external sources
-    // Example format if you had a plugin database:
-    // Some(format!("https://pluginicons.example.com/{}.png", 
-    //     plugin_name.to_lowercase().replace(" ", "-")))
+    // For file-based plugins or if no icon found in bundle,
+    // look for icon files in the same directory
+    if let Some(parent_dir) = plugin_path.parent() {
+        let plugin_name_lower = plugin_name.to_lowercase().replace(" ", "");
+        let icon_extensions = vec!["png", "ico", "jpg", "jpeg"];
+        
+        for ext in icon_extensions {
+            // Try plugin-name-specific icon
+            let icon_path = parent_dir.join(format!("{}.{}", plugin_name, ext));
+            if icon_path.exists() {
+                return Some(format!("file://{}", icon_path.display()));
+            }
+            
+            // Try with spaces removed
+            let icon_path = parent_dir.join(format!("{}.{}", plugin_name_lower, ext));
+            if icon_path.exists() {
+                return Some(format!("file://{}", icon_path.display()));
+            }
+        }
+    }
     
     None
 }
